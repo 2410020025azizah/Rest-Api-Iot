@@ -1,0 +1,218 @@
+<!DOCTYPE html>
+<html lang="id">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>IoT Dashboard - REST API</title>
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+<style>
+:root{--pink:#ffd6e7;--pink-d:#f4a6c6;--lav:#e6d9ff;--lav-d:#b9a2ee;--mint:#d3f5e5;--mint-d:#5cc79a;--peach:#ffe4d2;--peach-d:#f5a77d;--sky:#d8ecff;--sky-d:#6fb3ec;--ink:#5a3a52;--muted:#9a7c93}
+*{margin:0;padding:0;box-sizing:border-box;font-family:'Segoe UI',system-ui,sans-serif}
+body{background:linear-gradient(135deg,#ffe1ee 0%,#f1e3ff 50%,#dff1ff 100%);min-height:100vh;padding:24px;color:var(--ink)}
+.container{max-width:1050px;margin:0 auto}
+h1{text-align:center;margin-bottom:6px;font-size:28px;color:#c2578b}
+.sub{text-align:center;color:var(--muted);margin-bottom:24px;font-size:14px}
+.cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:18px;margin-bottom:22px}
+.card,.panel{border-radius:20px;padding:22px;box-shadow:0 8px 24px rgba(194,87,139,.15);border:2px solid rgba(255,255,255,.8)}
+.card{text-align:center;transition:transform .2s}.card:hover{transform:translateY(-4px)}
+.c-pink{background:var(--pink)}.c-sky{background:var(--sky)}.c-mint{background:var(--mint)}.c-peach{background:var(--peach)}
+.label{font-size:12px;text-transform:uppercase;letter-spacing:1.5px;color:var(--muted)}
+.value{font-size:40px;font-weight:700;margin:8px 0 2px}
+.c-pink .value{color:#d9558f}.c-sky .value{color:var(--sky-d)}.c-peach .value{color:var(--peach-d)}
+.unit{font-size:15px;color:var(--muted)}
+.badge{display:inline-block;padding:6px 16px;border-radius:20px;font-size:14px;font-weight:700}
+.on{background:#fff;color:var(--mint-d)}.off{background:#fff;color:#e0577f}
+.panel{background:rgba(255,255,255,.75);margin-bottom:22px;backdrop-filter:blur(6px)}
+.panel h2{font-size:17px;margin-bottom:14px;color:#b0507f}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{padding:11px 24px;border:none;border-radius:14px;font-size:14px;font-weight:700;cursor:pointer;transition:all .2s;color:#fff}
+.btn:hover{transform:scale(1.04)}
+.b-on{background:var(--mint-d)}.b-off{background:var(--pink-d)}.b-set{background:var(--lav-d)}
+input{padding:10px 14px;border:2px solid var(--lav);border-radius:12px;font-size:14px;background:#fff;color:var(--ink);outline:none}
+input:focus{border-color:var(--pink-d)}
+#alert{display:none;background:#fff0f5;border:2px solid var(--pink-d);color:#c2386f;padding:14px 18px;border-radius:16px;margin-bottom:22px;font-weight:600}
+.chart-box{position:relative;height:300px}
+table{width:100%;border-collapse:collapse}
+th,td{padding:10px;text-align:left;border-bottom:1px solid var(--pink);font-size:14px}
+th{background:var(--pink);color:#a8497a;font-size:12px;text-transform:uppercase}
+th:first-child{border-radius:10px 0 0 10px}th:last-child{border-radius:0 10px 10px 0}
+tr:hover td{background:#fff5fa}
+#log{background:#4a3045;color:#ffd6e7;font-family:monospace;padding:14px;border-radius:14px;max-height:170px;overflow-y:auto;font-size:13px;line-height:1.6}
+#log .error{color:#ff9bb8}#log .info{color:#c9b8ff}#log .ok{color:#a8f0cf}
+</style>
+</head>
+<body>
+<div class="container">
+  <h1>🌸 IoT Dashboard — REST API</h1>
+  <p class="sub">ESP32 → MQTT → Node-RED → REST API + WebSocket → Dashboard</p>
+
+  <div id="alert"></div>
+
+  <div class="cards">
+    <div class="card c-pink"><div class="label">Suhu</div><div class="value" id="suhu">--</div><div class="unit">°C</div></div>
+    <div class="card c-sky"><div class="label">Kelembaban</div><div class="value" id="kelembaban">--</div><div class="unit">%</div></div>
+    <div class="card c-mint"><div class="label">Status Sensor</div><div style="margin-top:14px"><span class="badge off" id="status-badge">OFFLINE</span></div><div class="unit" style="margin-top:10px" id="mode">Mode: -</div></div>
+    <div class="card c-peach"><div class="label">Batas Suhu</div><div class="value" id="th-now">--</div><div class="unit">°C</div></div>
+  </div>
+
+  <div class="panel">
+    <h2>📈 Grafik Real-time</h2>
+    <div class="chart-box"><canvas id="chart"></canvas></div>
+  </div>
+
+  <div class="panel">
+    <h2>⚙️ Pengaturan & Kontrol</h2>
+    <div class="row" style="margin-bottom:14px">
+      <input id="apikey" type="password" placeholder="API Key (X-API-Key)" style="min-width:230px">
+      <button class="btn b-set" onclick="saveKey()">Simpan Key</button>
+    </div>
+    <div class="row" style="margin-bottom:14px">
+      <input id="th-input" type="number" step="0.1" placeholder="Batas suhu (°C)">
+      <button class="btn b-set" onclick="setThreshold()">Set Batas Suhu (PUT)</button>
+    </div>
+    <div class="row">
+      <button class="btn b-on" onclick="kontrol('lamp','on')">💡 Nyalakan Lampu</button>
+      <button class="btn b-off" onclick="kontrol('lamp','off')">🌙 Matikan Lampu</button>
+    </div>
+  </div>
+
+  <div class="panel">
+    <h2>🗂️ 10 Data Sensor Terakhir (SQLite)</h2>
+    <table>
+      <thead><tr><th>Waktu</th><th>Suhu (°C)</th><th>Kelembaban (%)</th></tr></thead>
+      <tbody id="history-body"><tr><td colspan="3" style="text-align:center;color:#b9a2c0">Loading...</td></tr></tbody>
+    </table>
+  </div>
+
+  <div class="panel"><h2>📝 Log Aktivitas</h2><div id="log"></div></div>
+</div>
+
+<script>
+const BASE = location.protocol.startsWith('http') ? location.origin : 'http://localhost:1880';
+const API = BASE + '/api';
+const WS_URL = BASE.replace(/^http/, 'ws') + '/ws/sensor';
+let apiKey = 'iot-kampus-2026';
+try { apiKey = localStorage.getItem('apiKey') || apiKey; } catch (e) {}
+document.getElementById('apikey').value = apiKey;
+
+let hist = [], threshold = null, lastSeen = 0, wsOpen = false;
+const $ = id => document.getElementById(id);
+
+function log(msg, type = 'info') {
+  const el = $('log');
+  el.innerHTML += `<div class="${type}">[${new Date().toLocaleTimeString()}] ${msg}</div>`;
+  el.scrollTop = el.scrollHeight;
+}
+function saveKey() {
+  apiKey = $('apikey').value.trim();
+  try { localStorage.setItem('apiKey', apiKey); } catch (e) {}
+  log('API key disimpan', 'ok'); init();
+}
+async function api(path, opt = {}) {
+  const res = await fetch(API + path, { ...opt, headers: { 'Content-Type': 'application/json', 'X-API-Key': apiKey } });
+  const json = await res.json();
+  if (res.status === 401) throw new Error('401 - API key salah');
+  return json;
+}
+
+// ---------- Chart ----------
+const chart = new Chart($('chart'), {
+  type: 'line',
+  data: { labels: [], datasets: [
+    { label: 'Suhu (°C)', data: [], borderColor: '#f06fa5', backgroundColor: 'rgba(255,182,213,.35)', fill: true, tension: .4, pointRadius: 3 },
+    { label: 'Kelembaban (%)', data: [], borderColor: '#7ab8ee', backgroundColor: 'rgba(190,225,255,.3)', fill: true, tension: .4, pointRadius: 3 },
+    { label: 'Batas Suhu', data: [], borderColor: '#f5a77d', borderDash: [6, 6], pointRadius: 0, fill: false }
+  ]},
+  options: { responsive: true, maintainAspectRatio: false, animation: { duration: 400 },
+    plugins: { legend: { labels: { color: '#5a3a52' } } },
+    scales: { x: { ticks: { color: '#9a7c93' }, grid: { color: '#ffe1ee' } }, y: { ticks: { color: '#9a7c93' }, grid: { color: '#ffe1ee' } } } }
+});
+function redrawChart() {
+  const d = hist.slice(-30);
+  chart.data.labels = d.map(x => new Date(x.received).toLocaleTimeString());
+  chart.data.datasets[0].data = d.map(x => x.suhu);
+  chart.data.datasets[1].data = d.map(x => x.kelembaban);
+  chart.data.datasets[2].data = d.map(() => threshold);
+  chart.update();
+}
+
+// ---------- Render ----------
+function renderCards(d) {
+  $('suhu').textContent = d.suhu; $('kelembaban').textContent = d.kelembaban;
+  lastSeen = Date.now(); setStatus(true);
+}
+function setStatus(on) {
+  const b = $('status-badge'); b.textContent = on ? 'ONLINE' : 'OFFLINE'; b.className = 'badge ' + (on ? 'on' : 'off');
+}
+function renderTable() {
+  const rows = hist.slice(-10).reverse().map(d => `<tr><td>${new Date(d.received).toLocaleTimeString()}</td><td>${d.suhu}</td><td>${d.kelembaban}</td></tr>`).join('');
+  $('history-body').innerHTML = rows || '<tr><td colspan="3" style="text-align:center;color:#b9a2c0">Belum ada data</td></tr>';
+}
+function setThresholdUI(t) { threshold = t; $('th-now').textContent = t ?? '--'; }
+function showAlert(msg) {
+  const a = $('alert'); a.textContent = '🔔 ' + msg; a.style.display = 'block';
+  setTimeout(() => a.style.display = 'none', 8000);
+  log(msg, 'error');
+}
+function pushSensor(d) {
+  hist.push(d); if (hist.length > 50) hist.shift();
+  renderCards(d); renderTable(); redrawChart();
+}
+
+// ---------- REST ----------
+async function fetchSensor() {
+  try {
+    const j = await api('/suhu');
+    if (j.status === 'success' && j.data.suhu !== null) {
+      setThresholdUI(j.threshold);
+      if (!hist.length || hist[hist.length - 1].received !== j.data.received) pushSensor(j.data);
+    }
+  } catch (e) { log('Gagal fetch sensor: ' + e.message, 'error'); }
+}
+async function fetchHistory() {
+  try {
+    const j = await api('/history'); hist = j.data || [];
+    if (hist.length) renderCards(hist[hist.length - 1]);
+    renderTable(); redrawChart();
+  } catch (e) { log('Gagal fetch history: ' + e.message, 'error'); }
+}
+async function kontrol(device, action) {
+  try {
+    const j = await api('/kontrol', { method: 'POST', body: JSON.stringify({ device, action }) });
+    j.status === 'success' ? log(`✓ Perintah terkirim: ${device} → ${action}`, 'ok') : log('✗ Gagal: ' + j.message, 'error');
+  } catch (e) { log('✗ Error kontrol: ' + e.message, 'error'); }
+}
+async function setThreshold() {
+  const v = parseFloat($('th-input').value);
+  try {
+    const j = await api('/threshold', { method: 'PUT', body: JSON.stringify({ threshold: v }) });
+    if (j.status === 'success') { setThresholdUI(j.threshold); redrawChart(); log(`✓ Batas suhu = ${j.threshold} °C`, 'ok'); }
+    else log('✗ ' + j.message, 'error');
+  } catch (e) { log('✗ Error threshold: ' + e.message, 'error'); }
+}
+
+// ---------- WebSocket (fallback polling) ----------
+function connectWS() {
+  const ws = new WebSocket(WS_URL);
+  ws.onopen = () => { wsOpen = true; $('mode').textContent = 'Mode: WebSocket'; log('WebSocket terhubung', 'ok'); };
+  ws.onmessage = ev => {
+    const m = JSON.parse(ev.data);
+    if (m.type === 'sensor') { setThresholdUI(m.threshold); pushSensor(m.data); }
+    else if (m.type === 'alert') showAlert(m.message);
+    else if (m.type === 'threshold') { setThresholdUI(m.threshold); redrawChart(); }
+  };
+  ws.onclose = () => { wsOpen = false; $('mode').textContent = 'Mode: Polling'; setTimeout(connectWS, 3000); };
+  ws.onerror = () => ws.close();
+}
+
+async function init() {
+  await fetchHistory(); await fetchSensor();
+  try { const t = await api('/threshold'); setThresholdUI(t.threshold); redrawChart(); } catch (e) {}
+}
+log('Dashboard dimulai (WebSocket + fallback polling)');
+init(); connectWS();
+setInterval(() => { if (!wsOpen) fetchSensor(); }, 3000);
+setInterval(() => { if (Date.now() - lastSeen > 10000) setStatus(false); }, 2000);
+</script>
+</body>
+</html>
